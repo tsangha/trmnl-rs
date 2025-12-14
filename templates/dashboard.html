@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<!--
+  TRMNL Dashboard Template
+
+  This template is designed for text-heavy dashboards on e-ink displays.
+  It uses a two-column layout optimized for the 800x480 TRMNL display.
+
+  Key design principles:
+  - Fixed pixel positioning (Chrome headless doesn't handle flexbox well)
+  - High contrast (black text on white background)
+  - No images (text renders sharper on e-ink)
+  - Generous whitespace for readability
+  - Font sizes optimized for e-ink viewing distance
+
+  Customize by replacing the placeholder content with your data sources.
+-->
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 800px;
+            height: 480px;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: white;
+            color: black;
+        }
+
+        /* Header: date/time left, weather right */
+        .header {
+            position: absolute;
+            top: 10px;
+            left: 16px;
+            right: 16px;
+            height: 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-left {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+        .date { font-size: 20px; font-weight: bold; }
+        .time { font-size: 18px; color: #333; }
+        .weather { font-size: 18px; text-align: right; }
+        .weather-alert {
+            font-size: 16px;
+            font-weight: bold;
+            color: #000;
+            background: #ddd;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-top: 2px;
+        }
+
+        /* Two-column layout */
+        .columns {
+            position: absolute;
+            top: 55px;
+            left: 16px;
+            right: 16px;
+            bottom: 55px;
+            display: flex;
+            gap: 20px;
+            overflow: hidden;
+        }
+        .column { flex: 1; overflow: hidden; }
+
+        /* Section styling */
+        .section { margin-bottom: 12px; }
+        .section-title {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Data items */
+        .item { font-size: 14px; margin-bottom: 2px; }
+        .item strong { font-size: 16px; }
+        .task {
+            font-size: 13px;
+            margin-bottom: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .task-meta { font-size: 11px; color: #666; }
+        .alert { font-size: 12px; color: #666; font-style: italic; margin-top: 4px; }
+
+        /* Quote/message styling */
+        .quote { font-size: 15px; line-height: 1.4; font-style: italic; }
+        .quote-source { font-size: 12px; color: #666; margin-top: 4px; }
+
+        /* Briefing/body text */
+        .body-text { font-size: 12px; line-height: 1.4; }
+
+        /* Calendar/meeting styling */
+        .meeting { font-size: 13px; margin-bottom: 8px; line-height: 1.3; }
+        .meeting-time { font-weight: bold; display: inline-block; min-width: 70px; }
+        .empty-state { font-size: 13px; color: #666; font-style: italic; }
+
+        /* Footer: battery left, message center */
+        .footer {
+            position: absolute;
+            bottom: 15px;
+            left: 16px;
+            right: 16px;
+            height: 35px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid #ddd;
+            padding-top: 8px;
+            background: white;
+        }
+        .footer-left { font-size: 12px; color: #666; min-width: 60px; }
+        .footer-message { font-style: italic; font-size: 16px; text-align: center; flex: 1; }
+        .footer-right { min-width: 60px; }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <div class="header">
+        <div class="header-left">
+            <div class="date">{date}</div>
+            <div class="time">{time}</div>
+        </div>
+        <div class="weather">
+            {temperature} {condition}
+            <!-- Optional: weather alert -->
+            <!-- <div class="weather-alert">80% Rain in 2h</div> -->
+        </div>
+    </div>
+
+    <!-- TWO-COLUMN CONTENT -->
+    <div class="columns">
+        <!-- LEFT COLUMN -->
+        <div class="column">
+            <!-- Section 1: Simple key-value data -->
+            <div class="section">
+                <div class="section-title">Status</div>
+                <div class="item">Server: <strong>Online</strong></div>
+                <div class="item">CPU: <strong>23%</strong></div>
+                <div class="item">Memory: <strong>4.2GB</strong></div>
+            </div>
+
+            <!-- Section 2: Task list -->
+            <div class="section">
+                <div class="section-title">Tasks</div>
+                <div class="task">Review pull request #123 <span class="task-meta">(Today)</span></div>
+                <div class="task">Deploy v2.1 to staging <span class="task-meta">(Tomorrow)</span></div>
+                <div class="task">Update documentation <span class="task-meta">(Dec 18)</span></div>
+                <div class="alert">2 overdue</div>
+            </div>
+
+            <!-- Section 3: Calendar/meetings -->
+            <div class="section">
+                <div class="section-title">Today's Meetings</div>
+                <div class="meeting"><span class="meeting-time">10:00</span> Team standup</div>
+                <div class="meeting"><span class="meeting-time">14:00</span> Design review with Sarah</div>
+                <div class="meeting"><span class="meeting-time">16:30</span> 1:1 with manager</div>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="column">
+            <!-- Section 4: Body text (news, briefing, etc.) -->
+            <div class="section">
+                <div class="section-title">Briefing</div>
+                <div class="body-text">
+                    Your server handled 12,847 requests yesterday with 99.9% uptime.
+                    Three new issues were opened on GitHub. The CI pipeline is green.
+                    Memory usage has been stable around 65% for the past week.
+                </div>
+            </div>
+
+            <!-- Section 5: Quote or highlight -->
+            <div class="section">
+                <div class="section-title">Quote</div>
+                <div class="quote">"The best way to predict the future is to invent it."</div>
+                <div class="quote-source">- Alan Kay</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        <div class="footer-left">{battery}%</div>
+        <div class="footer-message">"{motivational_message}"</div>
+        <div class="footer-right"></div>
+    </div>
+</body>
+</html>

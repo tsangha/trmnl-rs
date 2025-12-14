@@ -1,390 +1,571 @@
 # trmnl-rs
 
-A Rust SDK for [TRMNL](https://usetrmnl.com) e-ink displays.
+A Rust framework for building [TRMNL](https://usetrmnl.com) BYOS (Bring Your Own Server) applications.
 
 [![Crates.io](https://img.shields.io/crates/v/trmnl.svg)](https://crates.io/crates/trmnl)
 [![Documentation](https://docs.rs/trmnl/badge.svg)](https://docs.rs/trmnl)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Features
+## What is TRMNL?
 
-- **Type-safe** - Push any `Serialize` type to your display
-- **Merge strategies** - Replace, deep merge, or stream data
-- **Rate limit handling** - Automatic detection of TRMNL's 12 req/hour limit
-- **Async** - Built on `reqwest` for efficient async I/O
+[TRMNL](https://usetrmnl.com) is an e-ink display device with an ESP32-C3 microcontroller and 7.5" screen. It connects to WiFi and periodically polls a server for content to display.
 
-## Quick Start
+**Terminology:**
+- **BYOS** (Bring Your Own Server) - You have a TRMNL device and point it at your own server instead of TRMNL's cloud
+- **BYOD** (Bring Your Own Device) - You have your own e-ink hardware (not TRMNL) running TRMNL firmware
+
+## When to Use This Crate
+
+**Use this crate if you want to:**
+- Run your own server instead of using TRMNL's cloud
+- Have complete control over what your display shows
+- Integrate private data sources (home automation, internal APIs, databases)
+- Build in Rust (there are also [Ruby](https://github.com/usetrmnl/byos_hanami) and [PHP](https://github.com/usetrmnl/byos_laravel) implementations)
+
+**Don't use this crate if you:**
+- Want to use TRMNL's cloud with webhooks and Liquid templates (just use their cloud)
+- Don't have a server to host your BYOS endpoint
+
+## Getting Started
+
+### 1. Get Your Device Ready
+
+**If you have a TRMNL device:**
+1. Purchase from [usetrmnl.com](https://usetrmnl.com)
+2. During WiFi setup, configure it to point to your server URL instead of TRMNL's cloud
+3. See [TRMNL's BYOS guide](https://docs.usetrmnl.com/go/diy/byos) for device configuration
+
+**If you're bringing your own device (BYOD):**
+1. Flash your ESP32-based e-ink display with [TRMNL firmware](https://github.com/usetrmnl/trmnl-firmware)
+2. Configure it to point to your server
+3. See [TRMNL's BYOD guide](https://docs.usetrmnl.com/go/diy/byod)
+
+### 2. Set Up Your Server
 
 Add to your `Cargo.toml`:
+```toml
+[dependencies]
+trmnl = { version = "0.1", features = ["axum", "render"] }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+```
+
+Create a minimal server (see full examples below):
+```rust
+use axum::{routing::get, Json, Router};
+use trmnl::{DeviceInfo, DisplayResponse};
+
+async fn display(device: DeviceInfo) -> Json<DisplayResponse> {
+    // Your display logic here
+    Json(DisplayResponse::new("https://yourserver.com/image.png", "image.png"))
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new().route("/api/display", get(display));
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+```
+
+### 3. Configure Your Device
+
+Point your device to `https://yourserver.com/api/display`. The device will poll this endpoint and display whatever image URL you return.
+
+## Official TRMNL Resources
+
+- [TRMNL API Documentation](https://docs.usetrmnl.com/go/) - Complete API reference
+- [BYOS Setup Guide](https://docs.usetrmnl.com/go/diy/byos) - Official BYOS documentation
+- [BYOD Setup Guide](https://docs.usetrmnl.com/go/diy/byod) - Bring your own device
+- [How It Works](https://docs.usetrmnl.com/go/how-it-works) - Device architecture
+- [Firmware Source](https://github.com/usetrmnl/trmnl-firmware) - Open source firmware (MIT)
+
+## How BYOS Works
+
+```
+┌─────────────┐         ┌─────────────────┐         ┌─────────────┐
+│   TRMNL     │  GET    │   Your Server   │  fetch  │  Your Data  │
+│   Device    │ ──────► │  (built with    │ ◄─────► │  Sources    │
+│             │ ◄────── │   this crate)   │         │             │
+└─────────────┘  JSON   └─────────────────┘         └─────────────┘
+                 + PNG
+```
+
+Your device polls your server every N seconds. Your server returns a JSON response pointing to a PNG image. The device downloads and displays it.
+
+### Where Can You Run Your Server?
+
+This crate helps you **build** a BYOS server - a Rust binary you can run anywhere:
+
+| Deployment | Notes |
+|------------|-------|
+| **Home server** | Raspberry Pi, NAS, old laptop - works great |
+| **VPS** | DigitalOcean, Linode, Hetzner, etc. |
+| **Cloud** | AWS, GCP, Azure, Fly.io, Railway |
+| **Local machine** | For development/testing |
+
+**Requirements:**
+- Your server must be reachable from your TRMNL device (same network or public internet)
+- If using HTML rendering (`render` feature), Chrome/Chromium must be installed
+- HTTPS recommended for public deployments (device supports both HTTP and HTTPS)
+
+**Home server tips:**
+- Use a static local IP or hostname (e.g., `http://192.168.1.100:3000` or `http://myserver.local:3000`)
+- For access outside your home, set up port forwarding or use a tunnel (Cloudflare Tunnel, Tailscale, ngrok)
+- Raspberry Pi 4 handles HTML rendering fine; Pi Zero may struggle with Chrome
+
+## Choose Your Setup
+
+### Option A: Dynamic HTML Rendering (Most Common)
+
+Best for: Dashboards, data displays, anything that changes frequently.
 
 ```toml
 [dependencies]
-trmnl = "0.1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-serde_json = "1.0"
+trmnl = { version = "0.1", features = ["axum", "render"] }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
 ```
 
-Push data to your display:
-
 ```rust
-use trmnl::Client;
-use serde_json::json;
+use axum::{routing::get, Json, Router};
+use trmnl::{DeviceInfo, DisplayResponse};
+use trmnl::render::{render_html_to_png, RenderConfig};
+
+async fn display(device: DeviceInfo) -> Json<DisplayResponse> {
+    // 1. Generate HTML (fetch your data, build your layout)
+    let html = format!(r#"
+        <html>
+        <body style="width:800px; height:480px; background:white; padding:20px;">
+            <h1>Hello from {}</h1>
+            <p>Battery: {}%</p>
+        </body>
+        </html>
+    "#, device.short_id(), device.battery_percentage().unwrap_or(0));
+
+    // 2. Render HTML to PNG
+    let png = render_html_to_png(&html, &RenderConfig::default()).await.unwrap();
+
+    // 3. Save to disk (your web server serves static files)
+    let filename = format!("{}.png", std::time::UNIX_EPOCH.elapsed().unwrap().as_secs());
+    std::fs::write(format!("/var/www/trmnl/{}", filename), &png).unwrap();
+
+    // 4. Return URL to the image
+    Json(DisplayResponse::new(
+        format!("https://myserver.com/trmnl/{}", filename),
+        filename,
+    ))
+}
 
 #[tokio::main]
-async fn main() -> Result<(), trmnl::Error> {
-    let client = Client::new("your-plugin-uuid");
-
-    client.push(json!({
-        "temperature": 72,
-        "humidity": 45,
-        "status": "Online"
-    })).await?;
-
-    Ok(())
+async fn main() {
+    let app = Router::new().route("/api/display", get(display));
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 ```
 
-## Merge Strategies
+**Requirements:** Chrome or Chromium installed on your server.
 
-TRMNL supports three strategies for updating display data:
+### Option B: Static/Pre-generated Images
+
+Best for: Simple displays, images generated elsewhere, or when you can't install Chrome.
+
+```toml
+[dependencies]
+trmnl = { version = "0.1", features = ["axum"] }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+```
 
 ```rust
-use trmnl::{Client, MergeStrategy};
-use serde_json::json;
+use axum::{routing::get, Json, Router};
+use trmnl::{DeviceInfo, DisplayResponse};
 
-let client = Client::new("your-plugin-uuid");
-
-// Replace all data (default)
-client.push(json!({"temp": 72})).await?;
-
-// Deep merge with existing data
-client.push_with_options(
-    json!({"weather": {"temp": 72}}),
-    Some(MergeStrategy::DeepMerge),
-    None,
-).await?;
-
-// Stream new items, keeping last 10
-client.push_with_options(
-    json!({"events": [{"name": "New Event"}]}),
-    Some(MergeStrategy::Stream),
-    Some(10),
-).await?;
+async fn display(_device: DeviceInfo) -> Json<DisplayResponse> {
+    // Just point to an existing image
+    // (generated by a cron job, external service, etc.)
+    Json(DisplayResponse::new(
+        "https://myserver.com/current-display.png",
+        "current-display.png",
+    ).with_refresh_rate(300)) // Check every 5 minutes
+}
 ```
 
-## Using with Typed Structs
+## API Reference
+
+### DeviceInfo
+
+Automatically extracted from request headers when using axum:
 
 ```rust
-use serde::Serialize;
-use trmnl::Client;
-
-#[derive(Serialize)]
-struct Dashboard {
-    date: String,
-    weather: String,
-    tasks: Vec<Task>,
+async fn display(device: DeviceInfo) -> Json<DisplayResponse> {
+    device.mac_address        // "AA:BB:CC:DD:EE:FF"
+    device.battery_voltage    // Some(4.2)
+    device.battery_percentage() // Some(100)
+    device.firmware_version   // Some("1.2.3")
+    device.rssi               // Some(-45) (WiFi signal in dBm)
+    device.short_id()         // "E:FF" (last 4 chars of MAC)
 }
-
-#[derive(Serialize)]
-struct Task {
-    name: String,
-    done: bool,
-}
-
-let client = Client::new("your-plugin-uuid");
-
-client.push(Dashboard {
-    date: "Monday, January 15".into(),
-    weather: "72°F Clear".into(),
-    tasks: vec![
-        Task { name: "Review PRs".into(), done: true },
-        Task { name: "Deploy app".into(), done: false },
-    ],
-}).await?;
 ```
 
-## Environment Variable
-
-The client can be created from the `TRMNL_PLUGIN_UUID` environment variable:
+### DisplayResponse
 
 ```rust
-if let Some(client) = Client::from_env() {
-    client.push(data).await?;
-}
+// Minimal
+DisplayResponse::new("https://url/image.png", "image.png")
+
+// With options
+DisplayResponse::new("https://url/image.png", "image.png")
+    .with_refresh_rate(60)    // Seconds until next poll (default: 60)
+    .with_firmware_update("https://url/firmware.bin")  // Trigger OTA
+    .with_reset()             // Reset device
 ```
 
----
+**Important:** The `filename` must change when your image changes. The device compares filenames to detect updates. Use timestamps:
 
-# TRMNL Framework Guide
+```rust
+let filename = format!("{}.png", SystemTime::now()
+    .duration_since(UNIX_EPOCH).unwrap().as_secs());
+```
 
-This section documents the TRMNL Framework CSS classes and best practices for building
-e-ink display UIs. These lessons were learned through extensive trial and error.
+### Render Config
+
+```rust
+use trmnl::render::RenderConfig;
+
+let config = RenderConfig {
+    chrome_path: None,        // Auto-detect, or Some("/path/to/chrome")
+    temp_dir: None,           // System temp, or Some(PathBuf::from("/tmp"))
+    optimize: true,           // Run through ImageMagick for smaller files
+    color_depth: 8,           // Bits per channel
+};
+```
+
+## BYOS Protocol
+
+Your server implements:
+
+| Endpoint | Method | Required | Purpose |
+|----------|--------|----------|---------|
+| `/api/display` | GET | Yes | Returns image URL |
+| `/api/setup` | GET | No | Device registration |
+| `/api/log` | POST | No | Receive device logs |
+
+The device sends these headers:
+- `ID`: MAC address
+- `Battery-Voltage`: e.g., "4.2"
+- `FW-Version`: Firmware version
+- `RSSI`: WiFi signal strength
+- `Refresh-Rate`: Current refresh rate
+
+## Authentication (Optional)
+
+By default, BYOS endpoints are public—anyone who knows your URL can access them. The device's MAC address (in the `ID` header) identifies the device but doesn't authenticate it.
+
+This crate provides optional token-based authentication via query parameters:
+
+### Setup
+
+1. Configure your device URL with a token:
+   ```
+   https://yourserver.com/api/display?token=your-secret-token
+   ```
+
+2. Set the token on your server (environment variable):
+   ```bash
+   export TRMNL_TOKEN=your-secret-token
+   ```
+
+3. Validate it in your handler:
+   ```rust
+   use axum::{Json, http::StatusCode};
+   use trmnl::{DeviceInfo, DisplayResponse, TokenAuth};
+
+   async fn display(
+       device: DeviceInfo,
+       auth: TokenAuth,
+   ) -> Result<Json<DisplayResponse>, (StatusCode, &'static str)> {
+       // Validate against environment variable
+       // If TRMNL_TOKEN is not set, allows all requests (open access)
+       auth.validate_env("TRMNL_TOKEN")
+           .map_err(|e| (StatusCode::UNAUTHORIZED, e.message))?;
+
+       Ok(Json(DisplayResponse::new("https://...", "image.png")))
+   }
+   ```
+
+### TokenAuth Methods
+
+```rust
+// Validate against a specific value
+auth.validate("my-secret-token")?;
+
+// Validate against environment variable (if not set, allows all requests)
+auth.validate_env("TRMNL_TOKEN")?;
+
+// Check if a token was provided (without validating)
+if auth.has_token() { ... }
+
+// Manual extraction (for non-axum use)
+let auth = TokenAuth::from_query_string("token=secret&other=value");
+```
+
+### Changing the Device URL
+
+The BYOS URL (including any `?token=` parameter) is configured on the device during WiFi setup. To change it:
+
+1. **Factory reset the device** (hold button for 10+ seconds until LED flashes)
+2. **Re-run WiFi setup** through the TRMNL app
+3. **Enter the new BYOS URL** with your token when prompted
+
+There's no way to change the BYOS URL without re-running WiFi setup—it's baked into the device's firmware configuration.
+
+**Important:** If you add token authentication to an existing BYOS setup, your device will start getting 401 errors until you update the URL on the device.
+
+### Device URL Format
+
+When configuring your device, use this URL format:
+
+```
+https://yourserver.com?token=your-secret-token
+```
+
+The device will automatically append `/api/display`, `/api/log`, etc. to this base URL.
 
 ## Display Constraints
 
-- **Resolution**: 800x480 pixels (landscape) or 480x800 (portrait)
-- **Color depth**: 1-bit (black/white) or 4-bit (16 grayscales)
-- **No animations** - E-ink refresh is slow (~1-2 seconds)
-- **High contrast** is essential for readability
-- **Simple layouts** work best
+- **Resolution**: 800×480 pixels (fixed)
+- **Max file size**: 90KB (device rejects larger)
+- **Format**: PNG
+- **Colors**: 16 or fewer for best e-ink rendering
+- **Orientation**: Landscape only
 
-## Critical Lessons Learned
+## Battery Life
 
-### What DOESN'T Work in Private Plugin Markup
+The TRMNL device uses a LiPo battery (3.0V-4.2V range). Battery drain depends primarily on refresh rate:
 
-1. **DO NOT wrap in `<div class="screen">`** - TRMNL adds this automatically. Including it breaks the layout.
+| Refresh Rate | Polls/Day | Expected Battery Life |
+|--------------|-----------|----------------------|
+| 60s (1 min)  | 1,440     | ~3-5 days            |
+| 300s (5 min) | 288       | ~2-3 weeks           |
+| 900s (15 min)| 96        | ~1-2 months          |
+| 1800s (30 min)| 48       | ~2-3 months          |
+| 3600s (1 hr) | 24        | ~3-4 months          |
 
-2. **DO NOT use `<div class="view view--full">`** wrapper - Also added by TRMNL. Including it causes content to overflow.
+**Tips for extending battery life:**
+- Use longer refresh rates for static content (weather, quotes)
+- Use shorter rates only for time-sensitive data (transit, meetings)
+- The device reports battery voltage in the `Battery-Voltage` header
+- Use `device.battery_percentage()` to display remaining charge
 
-3. **DO NOT use complex nested layouts** like `layout--row layout--stretch-x` - They often break and push content off-screen.
+## Building Text Dashboards
 
-4. **DO NOT use `item`, `meta`, `content` components** - They render but positioning is unpredictable.
+For text-heavy dashboards (tasks, calendars, briefings), use HTML with Chrome headless rendering. The key is fixed pixel positioning—Chrome headless doesn't handle flexbox reliably.
 
-5. **DO NOT use `title_bar`** - It doesn't position correctly in private plugins.
+### Dashboard Design Principles
 
-### What DOES Work
+1. **Fixed dimensions**: Always set `width: 800px; height: 480px` on body
+2. **Absolute positioning**: Use `position: absolute` for major sections
+3. **High contrast**: Black text on white background only
+4. **No images**: Text renders sharper on e-ink than images
+5. **Generous spacing**: E-ink needs more whitespace than LCD
 
-1. **Start with `<div class="layout">`** - This is your root container.
+### Example Layout
 
-2. **Use simple `columns` and `column`** - Basic two-column layouts work reliably.
-
-3. **Use basic typography**: `title`, `title--small`, `description`, `label`, `label--small`
-
-4. **Use plain HTML for simple layouts** - `<div>`, `<strong>`, `<small>`, `<br>` work fine.
-
-5. **Use inline styles sparingly** - `style="margin-top:12px"` is more reliable than complex CSS classes.
-
-6. **Keep it simple** - The simpler the markup, the better it renders.
-
-## Template Structure
-
-### Basic Template (Recommended)
-
-```html
-<div class="layout">
-  <div class="title">{{ title }}</div>
-  <div class="description">{{ description }}</div>
-
-  <div class="columns">
-    <div class="column">
-      <div class="title title--small">Left Column</div>
-      {% for item in left_items %}
-        <div><strong>{{ item.name }}</strong>: {{ item.value }}</div>
-      {% endfor %}
-    </div>
-
-    <div class="column">
-      <div class="title title--small">Right Column</div>
-      {% for item in right_items %}
-        <div><strong>{{ item.name }}</strong>: {{ item.value }}</div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <small style="margin-top:12px">Updated: {{ time }}</small>
-</div>
+```
+┌────────────────────────────────────────────────────────────┐
+│  Header: Date/Time (left)              Weather (right)     │
+├────────────────────────────┬───────────────────────────────┤
+│                            │                               │
+│  Left Column               │  Right Column                 │
+│  - Status/metrics          │  - Briefing text              │
+│  - Task list               │  - Quotes/highlights          │
+│  - Calendar/meetings       │  - News/updates               │
+│                            │                               │
+├────────────────────────────┴───────────────────────────────┤
+│  Footer: Battery (left)    Message (center)                │
+└────────────────────────────────────────────────────────────┘
 ```
 
-### Typography Classes
+### Example Template
 
-| Class | Use For |
-|-------|---------|
-| `title` | Large heading text |
-| `title--small` | Section headers |
-| `label` | Medium text for labels |
-| `label--small` | Smaller label text |
-| `description` | Body/paragraph text |
-| `value` | Numeric values (use sparingly, can be finicky) |
+See [`templates/dashboard.html`](templates/dashboard.html) for a complete example with:
+- Two-column layout with header and footer
+- Task lists with due dates
+- Meeting schedules
+- Body text sections
+- Quote/highlight sections
 
-## Complete Dashboard Example
+### Font Size Guidelines
 
-This template works reliably for a personal dashboard:
+| Element | Size | Use For |
+|---------|------|---------|
+| 20px | Headers | Date, main titles |
+| 18px | Subheaders | Time, weather |
+| 16px | Emphasis | Key values, footer message |
+| 14-15px | Body | Section titles, quotes |
+| 12-13px | Details | Task items, body text |
+| 11px | Meta | Timestamps, sources |
 
-```html
-<div class="layout">
-  <!-- Header -->
-  <div style="display:flex; justify-content:space-between; margin-bottom:12px">
-    <span class="title">{{ date }}</span>
-    <span class="label">{{ weather }}</span>
-  </div>
+### CSS Template
 
-  <!-- Two Column Layout -->
-  <div class="columns">
-    <!-- Left: Stats -->
-    <div class="column">
-      <div class="title title--small">Stats</div>
-      {% for station in stations %}
-        <div style="display:flex; justify-content:space-between">
-          <span class="label">{{ station.name }}</span>
-          <span class="title title--small">{{ station.value }}</span>
-        </div>
-      {% endfor %}
-
-      <div class="title title--small" style="margin-top:12px">Tasks</div>
-      {% for task in tasks limit:5 %}
-        <div class="label">{{ task.name }}</div>
-      {% endfor %}
-    </div>
-
-    <!-- Right: Message -->
-    <div class="column">
-      <div class="title title--small">Today</div>
-      <div class="description">{{ briefing | truncate: 200 }}</div>
-
-      <div style="margin-top:12px; padding:8px; border:1px solid black">
-        <div class="description">"{{ quote }}"</div>
-        <small>- {{ author }}</small>
-      </div>
-    </div>
-  </div>
-
-  <!-- Footer -->
-  <div style="display:flex; justify-content:space-between; margin-top:12px">
-    <small>My Dashboard</small>
-    <small>{{ time }}</small>
-  </div>
-</div>
-```
-
-## Liquid Template Reference
-
-### Variables
-
-```liquid
-{{ variable }}
-{{ object.property }}
-{{ array[0] }}
-```
-
-### Loops
-
-```liquid
-{% for item in items %}
-  {{ forloop.index }}. {{ item.name }}
-{% endfor %}
-
-{% for item in items limit:5 %}
-  {{ item.name }}
-{% endfor %}
-```
-
-### Conditionals
-
-```liquid
-{% if condition %}
-  Content
-{% elsif other_condition %}
-  Other content
-{% else %}
-  Fallback
-{% endif %}
-
-{% unless empty %}
-  Has content
-{% endunless %}
-```
-
-### Filters
-
-```liquid
-{{ text | truncate: 100 }}
-{{ text | upcase }}
-{{ text | downcase }}
-{{ number | plus: 1 }}
-{{ array | size }}
-{{ array | first }}
-{{ array | last }}
-{{ date | date: "%B %d, %Y" }}
-```
-
-### TRMNL-Specific Variables
-
-```liquid
-{{ trmnl.user.locale }}
-{{ trmnl.user.utc_offset }}
-{{ trmnl.plugin_settings.instance_name }}
-```
-
-## Integration Modes
-
-### Polling Mode
-
-TRMNL polls your endpoint periodically. You return JSON that TRMNL renders using your Liquid template.
-
-**Your Rust server:**
-```rust
-use axum::{Json, extract::Query};
-use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize)]
-struct DisplayQuery {
-    token: Option<String>,
+```css
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+    width: 800px;
+    height: 480px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: white;
+    color: black;
 }
-
-#[derive(Serialize)]
-struct DisplayData {
-    date: String,
-    weather: String,
-    tasks: Vec<Task>,
+.header {
+    position: absolute;
+    top: 10px;
+    left: 16px;
+    right: 16px;
+    height: 40px;
 }
-
-async fn get_display(Query(q): Query<DisplayQuery>) -> Json<DisplayData> {
-    // Validate token...
-    Json(DisplayData {
-        date: "Monday, January 15".into(),
-        weather: "72°F Clear".into(),
-        tasks: vec![/* ... */],
-    })
+.columns {
+    position: absolute;
+    top: 55px;
+    left: 16px;
+    right: 16px;
+    bottom: 55px;
+    display: flex;
+    gap: 20px;
+}
+.column { flex: 1; overflow: hidden; }
+.footer {
+    position: absolute;
+    bottom: 15px;
+    left: 16px;
+    right: 16px;
+    height: 35px;
+    border-top: 1px solid #ddd;
 }
 ```
 
-**Plugin settings:**
+## Refresh Rate Scheduling
+
+The `schedule` feature lets you configure different refresh rates based on time of day and day of week. This helps optimize battery life while keeping displays fresh when needed.
+
+```toml
+[dependencies]
+trmnl = { version = "0.1", features = ["axum", "schedule"] }
+```
+
+### Schedule Configuration (YAML)
+
+Create a schedule config file:
+
 ```yaml
-strategy: polling
-polling_url: https://your-server.com/display?token=secret
-polling_verb: GET
-refresh_interval: 60
+# config/schedule.yaml
+timezone: "America/New_York"
+default_refresh_rate: 300  # 5 minutes (fallback if no rule matches)
+
+schedule:
+  # Sleep hours - infrequent updates to save battery
+  - days: all
+    start: "23:00"
+    end: "06:00"
+    refresh_rate: 1800  # 30 minutes
+
+  # Morning routine - frequent updates
+  - days: weekdays
+    start: "06:00"
+    end: "09:00"
+    refresh_rate: 60  # 1 minute
+
+  # Work hours - moderate updates
+  - days: weekdays
+    start: "09:00"
+    end: "18:00"
+    refresh_rate: 120  # 2 minutes
+
+  # Weekend - relaxed
+  - days: weekends
+    start: "06:00"
+    end: "23:00"
+    refresh_rate: 600  # 10 minutes
 ```
 
-### Push/Webhook Mode
+### Day Selectors
 
-Your server pushes data to TRMNL when it changes.
+- `all` - Every day
+- `weekdays` - Monday through Friday
+- `weekends` - Saturday and Sunday
+- `["mon", "wed", "fri"]` - Specific days (list format)
+- `monday` / `mon` - Single day
+
+### Usage
+
+**Option 1: Global schedule (recommended for most apps)**
 
 ```rust
-use trmnl::Client;
+use trmnl::{init_global_schedule, get_global_refresh_rate};
 
-let client = Client::new("your-plugin-uuid");
+#[tokio::main]
+async fn main() {
+    // Load once at startup
+    init_global_schedule("config/schedule.yaml");
 
-// Push whenever data changes
-client.push(json!({
-    "temperature": 72,
-    "updated_at": "10:30 AM"
-})).await?;
+    // ... start your server
+}
+
+async fn display(device: DeviceInfo) -> Json<DisplayResponse> {
+    // Returns rate based on current time, or 60s if no schedule loaded
+    let refresh_rate = get_global_refresh_rate();
+
+    Json(DisplayResponse::new(url, filename)
+        .with_refresh_rate(refresh_rate))
+}
 ```
 
-**Plugin settings:**
-```yaml
-strategy: webhook
-# No polling URL needed - you push to TRMNL
+**Option 2: Manual schedule management**
+
+```rust
+use trmnl::schedule::RefreshSchedule;
+
+// Load schedule at startup
+let schedule = RefreshSchedule::load("config/schedule.yaml")?;
+
+// In your display handler
+async fn display(device: DeviceInfo) -> Json<DisplayResponse> {
+    let refresh_rate = schedule.get_refresh_rate(); // Returns rate based on current time
+
+    Json(DisplayResponse::new(url, filename)
+        .with_refresh_rate(refresh_rate))
+}
 ```
 
-## E-ink Design Best Practices
+### Time Ranges
 
-1. **Maximize contrast** - Use pure black and white when possible
-2. **Avoid thin lines** - Minimum 2px for visibility
-3. **Large text** - Text should be readable from arm's length
-4. **Simple layouts** - Less is more on a small e-ink display
-5. **Test on device** - Emulators may not show dithering accurately
-6. **Use semantic hierarchy** - `title` > `label` > `description` for visual weight
-7. **Limit content** - Don't try to cram too much information
+- Normal ranges: `09:00` to `17:00` matches 9am-5pm
+- Overnight ranges: `23:00` to `06:00` matches 11pm-6am (spans midnight)
+- End time is exclusive: `09:00` to `17:00` does not include exactly 17:00
 
-## Resources
+## Feature Flags
 
-- [TRMNL Design System](https://usetrmnl.com/framework)
-- [Private Plugins Docs](https://docs.usetrmnl.com/go/private-plugins)
-- [Webhooks API](https://docs.usetrmnl.com/go/private-plugins/webhooks)
-- [Template Guide](https://docs.usetrmnl.com/go/private-plugins/templates)
-- [Liquid 101](https://help.usetrmnl.com/en/articles/10671186-liquid-101)
+| Feature | Dependencies Added | Use When |
+|---------|-------------------|----------|
+| `axum` | axum, http | Building a web server (most users) |
+| `render` | tokio | Generating images from HTML (requires Chrome) |
+| `schedule` | chrono, chrono-tz, serde_yaml | Time-based refresh rate scheduling |
+| `full` | All of the above | You want everything |
+
+## Examples
+
+See the [`examples/`](examples/) directory:
+- `basic_byos.rs` - Minimal BYOS server
+- `with_render.rs` - HTML rendering example
+
+Run with:
+```bash
+cargo run --example basic_byos --features axum
+cargo run --example with_render --features "axum render"
+```
 
 ## License
 

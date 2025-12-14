@@ -3,34 +3,60 @@ name = "trmnl"
 version = "0.1.0"
 edition = "2021"
 authors = ["Taj Sangha <taj@tajwarsangha.com>"]
-description = "Rust SDK for TRMNL e-ink displays"
+description = "BYOS (Bring Your Own Server) framework for TRMNL e-ink displays"
 license = "MIT"
 repository = "https://github.com/tsangha/trmnl-rs"
 documentation = "https://docs.rs/trmnl"
-keywords = ["trmnl", "e-ink", "display", "dashboard", "iot"]
-categories = ["api-bindings", "asynchronous"]
 readme = "README.md"
+keywords = ["trmnl", "e-ink", "display", "byos", "iot"]
+categories = ["embedded", "web-programming", "hardware-support"]
+rust-version = "1.70"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+# Enable axum integration (extractors, handlers)
+axum = ["dep:axum", "dep:http"]
+# Enable HTML to PNG rendering via Chrome headless
+render = ["dep:tokio"]
+# Enable time-based refresh rate scheduling
+schedule = ["dep:chrono", "dep:chrono-tz", "dep:serde_yaml"]
+# Enable all features
+full = ["axum", "render", "schedule"]
 
 [dependencies]
-reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
+form_urlencoded = "1.2"  # For query string parsing in auth (lighter than url crate)
+
+# Optional: axum integration
+axum = { version = "0.8", optional = true }
+http = { version = "1.0", optional = true }
+
+# Optional: image rendering
+tokio = { version = "1", features = ["process", "fs"], optional = true }
+
+# Optional: refresh rate scheduling
+chrono = { version = "0.4", optional = true }
+chrono-tz = { version = "0.10", optional = true }
+serde_yaml = { version = "0.9", optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-wiremock = "0.6"
-
-[features]
-default = []
-# Enable tracing instrumentation
-tracing = []
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+http = "1.0"
 
 [[example]]
-name = "basic"
-path = "examples/basic.rs"
+name = "basic_byos"
+path = "examples/basic_byos.rs"
+required-features = ["axum"]
 
 [[example]]
-name = "custom_data"
-path = "examples/custom_data.rs"
+name = "with_render"
+path = "examples/with_render.rs"
+required-features = ["axum", "render"]

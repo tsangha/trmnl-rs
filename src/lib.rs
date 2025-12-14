@@ -1,118 +1,149 @@
 //! # trmnl
 //!
-//! A Rust SDK for [TRMNL](https://usetrmnl.com) e-ink displays.
+//! A BYOS (Bring Your Own Server) framework for [TRMNL](https://usetrmnl.com) e-ink displays.
 //!
-//! TRMNL is a customizable e-ink dashboard that displays information from various sources.
-//! This crate provides a type-safe client for pushing data to TRMNL displays via their
-//! webhook API.
+//! TRMNL devices can operate in two modes:
+//! - **Cloud mode**: Device polls TRMNL's servers, which poll your webhook
+//! - **BYOS mode**: Device polls your server directly (this crate's focus)
 //!
-//! ## Quick Start
+//! This crate provides everything you need to build a BYOS server:
+//! - Protocol types that match firmware expectations
+//! - Device info extraction from HTTP headers
+//! - Optional axum integration for quick setup
+//! - Optional HTML-to-PNG rendering via Chrome headless
 //!
-//! ```rust,no_run
-//! use trmnl::{Client, Error};
-//! use serde_json::json;
+//! ## Quick Start (axum)
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Error> {
-//!     // Create a client with your plugin UUID
-//!     let client = Client::new("your-plugin-uuid");
+//! ```rust,ignore
+//! use axum::{Router, routing::get};
+//! use trmnl::{DisplayResponse, DeviceInfo};
 //!
-//!     // Push any JSON-serializable data
-//!     client.push(json!({
-//!         "temperature": 72,
-//!         "humidity": 45,
-//!         "status": "Online"
-//!     })).await?;
+//! async fn display(device: DeviceInfo) -> axum::Json<DisplayResponse> {
+//!     println!("Request from device: {}", device.mac_address);
 //!
-//!     Ok(())
+//!     axum::Json(DisplayResponse::new(
+//!         "https://example.com/screen.png",
+//!         "screen.png",
+//!     ))
 //! }
+//!
+//! let app = Router::new()
+//!     .route("/api/display", get(display));
 //! ```
 //!
-//! ## Features
+//! ## Display Dimensions
 //!
-//! - **Type-safe**: Push any `Serialize` type to your display
-//! - **Merge strategies**: Replace, deep merge, or stream data
-//! - **Rate limit handling**: Automatic detection of TRMNL's 12 req/hour limit
-//! - **Async**: Built on `reqwest` for efficient async I/O
+//! TRMNL displays are 800x480 pixels. Images must be:
+//! - Exactly 800x480 PNG
+//! - Under 90KB (firmware rejects larger files)
+//! - 16 colors or less for optimal e-ink rendering
 //!
-//! ## Merge Strategies
+//! ## BYOS Protocol
 //!
-//! TRMNL supports three merge strategies for webhook updates:
+//! Your server must implement these endpoints:
 //!
-//! - [`MergeStrategy::Replace`] - Completely replace existing data (default)
-//! - [`MergeStrategy::DeepMerge`] - Recursively merge with existing data
-//! - [`MergeStrategy::Stream`] - Append to arrays with optional size limit
+//! | Endpoint | Method | Purpose |
+//! |----------|--------|---------|
+//! | `/api/setup` | GET | Device registration (optional) |
+//! | `/api/display` | GET | Returns image URL and metadata |
+//! | `/api/log` | POST | Receives device telemetry (optional) |
 //!
-//! ```rust,no_run
-//! use trmnl::{Client, MergeStrategy};
-//! use serde_json::json;
+//! The device sends these headers:
+//! - `ID`: Device MAC address
+//! - `Battery-Voltage`: Battery voltage (e.g., "4.2")
+//! - `FW-Version`: Firmware version
+//! - `RSSI`: WiFi signal strength
+//! - `Refresh-Rate`: Current refresh rate
 //!
-//! # async fn example() -> Result<(), trmnl::Error> {
-//! let client = Client::new("your-plugin-uuid");
+//! ## Feature Flags
 //!
-//! // Stream new items to an array, keeping last 10
-//! client.push_with_options(
-//!     json!({ "events": [{ "time": "10:30", "name": "Meeting" }] }),
-//!     Some(MergeStrategy::Stream),
-//!     Some(10),
-//! ).await?;
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## E-ink Display Constraints
-//!
-//! When designing content for TRMNL displays:
-//!
-//! - **Resolution**: 800x480 pixels (landscape) or 480x800 (portrait)
-//! - **Color depth**: 1-bit (black/white) or 4-bit (16 grayscales)
-//! - **No animations** - E-ink refresh is slow
-//! - **High contrast** is essential for readability
-//! - **Simple layouts** work best
-//!
-//! ## Template Design Tips
-//!
-//! **What works in TRMNL Private Plugin Markup:**
-//!
-//! - Start with `<div class="layout">` as your root container
-//! - Use simple `columns` and `column` for two-column layouts
-//! - Basic typography: `title`, `title--small`, `description`, `label`, `label--small`
-//! - Plain HTML elements: `<div>`, `<strong>`, `<small>`, `<br>`
-//! - Inline styles for spacing: `style="margin-top:12px"`
-//!
-//! **What DOESN'T work:**
-//!
-//! - Don't wrap in `<div class="screen">` - TRMNL adds this automatically
-//! - Don't use `<div class="view view--full">` wrapper - Also added by TRMNL
-//! - Complex nested layouts like `layout--row layout--stretch-x` often break
-//! - The `item`, `meta`, `content` components have unpredictable positioning
-//! - Don't use `title_bar` - It doesn't position correctly in private plugins
-//!
-//! See the [README](https://github.com/tsangha/trmnl-rs) for complete template examples.
+//! - `axum` - Axum extractors and handlers
+//! - `render` - HTML to PNG rendering via Chrome headless
+//! - `schedule` - Time-based refresh rate scheduling (YAML config)
+//! - `full` - All features
 
-mod client;
+pub mod auth;
+mod byos;
 mod error;
 
-pub use client::{Client, MergeStrategy};
+pub use auth::TokenAuth;
+pub use byos::{
+    DeviceInfo, DeviceStatusStamp, DisplayResponse, LogEntry, LogResponse, SetupResponse,
+};
 pub use error::Error;
 
-/// Default timeout for HTTP requests (10 seconds)
-pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
+/// TRMNL display width in pixels
+pub const DISPLAY_WIDTH: u32 = 800;
 
-/// TRMNL API base URL
-pub const API_BASE_URL: &str = "https://usetrmnl.com/api/custom_plugins";
+/// TRMNL display height in pixels
+pub const DISPLAY_HEIGHT: u32 = 480;
 
-/// Maximum requests per hour allowed by TRMNL
-pub const RATE_LIMIT_PER_HOUR: u32 = 12;
+/// Maximum image size in bytes (firmware rejects larger)
+pub const MAX_IMAGE_SIZE: usize = 90 * 1024; // 90KB
+
+/// LiPo battery minimum voltage (0%)
+pub const BATTERY_MIN_MV: u32 = 3000;
+
+/// LiPo battery maximum voltage (100%)
+pub const BATTERY_MAX_MV: u32 = 4200;
+
+// Optional modules
+#[cfg(feature = "render")]
+pub mod render;
+#[cfg(feature = "render")]
+pub use render::{render_html_to_png, timestamped_filename, RenderConfig};
+
+#[cfg(feature = "schedule")]
+pub mod schedule;
+#[cfg(feature = "schedule")]
+pub use schedule::{
+    get_global_refresh_rate, init_global_schedule, DaySelector, RefreshSchedule, ScheduleRule,
+};
+
+// Re-export axum integration
+#[cfg(feature = "axum")]
+pub mod axum_ext;
+
+/// Convert battery voltage (in millivolts) to percentage.
+///
+/// Uses standard LiPo voltage curve: 3.0V (0%) to 4.2V (100%).
+///
+/// # Example
+///
+/// ```
+/// use trmnl::battery_percentage;
+///
+/// assert_eq!(battery_percentage(4200), 100);
+/// assert_eq!(battery_percentage(3600), 50);
+/// assert_eq!(battery_percentage(3000), 0);
+/// ```
+pub fn battery_percentage(voltage_mv: u32) -> u8 {
+    if voltage_mv <= BATTERY_MIN_MV {
+        0
+    } else if voltage_mv >= BATTERY_MAX_MV {
+        100
+    } else {
+        ((voltage_mv - BATTERY_MIN_MV) * 100 / (BATTERY_MAX_MV - BATTERY_MIN_MV)) as u8
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn test_battery_percentage() {
+        assert_eq!(battery_percentage(4200), 100);
+        assert_eq!(battery_percentage(4201), 100); // Clamp high
+        assert_eq!(battery_percentage(3000), 0);
+        assert_eq!(battery_percentage(2999), 0); // Clamp low
+        assert_eq!(battery_percentage(3600), 50);
+    }
+
+    #[test]
     fn test_constants() {
-        assert_eq!(DEFAULT_TIMEOUT_SECS, 10);
-        assert_eq!(RATE_LIMIT_PER_HOUR, 12);
-        assert!(API_BASE_URL.starts_with("https://"));
+        assert_eq!(DISPLAY_WIDTH, 800);
+        assert_eq!(DISPLAY_HEIGHT, 480);
+        assert_eq!(MAX_IMAGE_SIZE, 90 * 1024);
     }
 }
