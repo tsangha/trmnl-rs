@@ -341,24 +341,6 @@ The device will automatically append `/api/display`, `/api/log`, etc. to this ba
 - **Colors**: 16 or fewer for best e-ink rendering
 - **Orientation**: Landscape only
 
-## Battery Life
-
-The TRMNL device uses a LiPo battery (3.0V-4.2V range). Battery drain depends primarily on refresh rate:
-
-| Refresh Rate | Polls/Day | Expected Battery Life |
-|--------------|-----------|----------------------|
-| 60s (1 min)  | 1,440     | ~3-5 days            |
-| 300s (5 min) | 288       | ~2-3 weeks           |
-| 900s (15 min)| 96        | ~1-2 months          |
-| 1800s (30 min)| 48       | ~2-3 months          |
-| 3600s (1 hr) | 24        | ~3-4 months          |
-
-**Tips for extending battery life:**
-- Use longer refresh rates for static content (weather, quotes)
-- Use shorter rates only for time-sensitive data (transit, meetings)
-- The device reports battery voltage in the `Battery-Voltage` header
-- Use `device.battery_percentage()` to display remaining charge
-
 ## Building Text Dashboards
 
 For text-heavy dashboards (tasks, calendars, briefings), use HTML with Chrome headless rendering. The key is fixed pixel positioning—Chrome headless doesn't handle flexbox reliably.
@@ -545,6 +527,25 @@ async fn display(device: DeviceInfo) -> Json<DisplayResponse> {
 - Normal ranges: `09:00` to `17:00` matches 9am-5pm
 - Overnight ranges: `23:00` to `06:00` matches 11pm-6am (spans midnight)
 - End time is exclusive: `09:00` to `17:00` does not include exactly 17:00
+
+### Battery Life Impact
+
+The TRMNL device uses a LiPo battery (3.0V-4.2V range). Battery drain depends primarily on refresh rate:
+
+| Refresh Rate | Polls/Day | Expected Battery Life |
+|--------------|-----------|----------------------|
+| 60s (1 min)  | 1,440     | ~3-5 days            |
+| 300s (5 min) | 288       | ~2-3 weeks           |
+| 900s (15 min)| 96        | ~1-2 months          |
+| 1800s (30 min)| 48       | ~2-3 months          |
+| 3600s (1 hr) | 24        | ~3-4 months          |
+
+**Tips for extending battery life:**
+- Use longer refresh rates for static content (weather, quotes)
+- Use shorter rates only for time-sensitive data (transit, meetings)
+- Schedule slower rates during sleep hours (see example above)
+- The device reports battery voltage in the `Battery-Voltage` header
+- Use `device.battery_percentage()` to display remaining charge
 
 ## Feature Flags
 
