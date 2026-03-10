@@ -114,17 +114,14 @@ pub mod axum_ext;
 /// use trmnl::battery_percentage;
 ///
 /// assert_eq!(battery_percentage(4200), 100);
-/// assert_eq!(battery_percentage(3600), 50);
-/// assert_eq!(battery_percentage(3000), 0);
+/// assert_eq!(battery_percentage(3600), 27);
+/// assert_eq!(battery_percentage(3200), 0);
 /// ```
 pub fn battery_percentage(voltage_mv: u32) -> u8 {
-    if voltage_mv <= BATTERY_MIN_MV {
-        0
-    } else if voltage_mv >= BATTERY_MAX_MV {
-        100
-    } else {
-        ((voltage_mv - BATTERY_MIN_MV) * 100 / (BATTERY_MAX_MV - BATTERY_MIN_MV)) as u8
-    }
+    let v = voltage_mv as f32 / 1000.0;
+
+    let soc = -144.93 * v * v * v + 1655.86 * v * v - 6158.85 * v + 7501.32;
+    soc.clamp(0.0, 100.0) as u8
 }
 
 #[cfg(test)]
@@ -133,11 +130,19 @@ mod tests {
 
     #[test]
     fn test_battery_percentage() {
-        assert_eq!(battery_percentage(4200), 100);
         assert_eq!(battery_percentage(4201), 100); // Clamp high
-        assert_eq!(battery_percentage(3000), 0);
-        assert_eq!(battery_percentage(2999), 0); // Clamp low
-        assert_eq!(battery_percentage(3600), 50);
+        assert_eq!(battery_percentage(4200), 100);
+        assert_eq!(battery_percentage(4100), 96);
+        assert_eq!(battery_percentage(4000), 84);
+        assert_eq!(battery_percentage(3900), 70);
+        assert_eq!(battery_percentage(3800), 55);
+        assert_eq!(battery_percentage(3700), 41);
+        assert_eq!(battery_percentage(3600), 27);
+        assert_eq!(battery_percentage(3500), 15);
+        assert_eq!(battery_percentage(3400), 6);
+        assert_eq!(battery_percentage(3300), 1);
+        assert_eq!(battery_percentage(3200), 0);
+        assert_eq!(battery_percentage(3199), 0); // Clamp low
     }
 
     #[test]
