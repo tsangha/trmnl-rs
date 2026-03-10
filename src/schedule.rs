@@ -167,23 +167,20 @@ impl RefreshSchedule {
 impl ScheduleRule {
     /// Check if this rule matches the given day and time.
     fn matches(&self, weekday: Weekday, time: NaiveTime) -> bool {
-        // Check if the day matches
-        if !self.day_matches(weekday) {
-            return false;
-        }
-
-        // Parse start and end times
         let start = parse_time(&self.start);
         let end = parse_time(&self.end);
 
         match (start, end) {
             (Some(s), Some(e)) => {
                 if s <= e {
-                    // Normal range (e.g., 09:00 - 17:00)
-                    time >= s && time < e
+                    // Normal range (e.g., 09:00 - 17:00): day must match today
+                    self.day_matches(weekday) && time >= s && time < e
                 } else {
-                    // Overnight range (e.g., 23:00 - 06:00)
-                    time >= s || time < e
+                    // Overnight range (e.g., 23:00 - 06:00):
+                    // Before midnight: today's day must match
+                    // After midnight: yesterday's day must match (the night started on the previous day)
+                    (self.day_matches(weekday) && time >= s)
+                        || (self.day_matches(weekday.pred()) && time < e)
                 }
             }
             _ => false,
@@ -377,6 +374,113 @@ mod tests {
         assert!(rule.matches(Weekday::Mon, time_3am));
         assert!(rule.matches(Weekday::Mon, time_11pm));
         assert!(!rule.matches(Weekday::Mon, time_noon));
+    }
+
+    #[test]
+    fn test_overnight_rule_weekend() {
+        // "weekends" 23:00 -> 03:00 means:
+        //   Sat 23:30 -> matches (Sat is a weekend, before midnight)
+        //   Sun 02:00 -> matches (Sat night carries into Sun morning)
+        //   Sun 23:30 -> matches (Sun is a weekend, before midnight)
+        //   Mon 02:00 -> matches (Sun night carries into Mon morning)
+        //   Mon 23:30 -> no match (Mon is not a weekend)
+        //   Tue 02:00 -> no match (Mon night is not a weekend night)
+        let rule = ScheduleRule {
+            days: DaySelector::Named("weekends".to_string()),
+            start: "23:00".to_string(),
+            end: "03:00".to_string(),
+            refresh_rate: 1800,
+        };
+
+        let t_11pm = NaiveTime::from_hms_opt(23, 30, 0).unwrap();
+        let t_2am = NaiveTime::from_hms_opt(2, 0, 0).unwrap();
+        let t_noon = NaiveTime::from_hms_opt(12, 0, 0).unwrap();
+
+        assert!(!rule.matches(Weekday::Sat, t_2am)); // Sat early morging
+        assert!(rule.matches(Weekday::Sat, t_11pm)); // Sat before midnight
+        assert!(rule.matches(Weekday::Sun, t_2am)); // Sat night after midnight
+        assert!(rule.matches(Weekday::Sun, t_11pm)); // Sun before midnight
+        assert!(rule.matches(Weekday::Mon, t_2am)); // Sun night after midnight
+        assert!(!rule.matches(Weekday::Mon, t_11pm)); // Mon before midnight — not a weekend
+        assert!(!rule.matches(Weekday::Tue, t_2am)); // Mon night — not a weekend night
+        assert!(!rule.matches(Weekday::Sat, t_noon)); // Outside time window
+    }
+
+    #[test]
+    fn test_overnight_rule_day_list() {
+        let rule = ScheduleRule {
+            days: DaySelector::List(vec!["fri".to_string(), "sat".to_string()]),
+            start: "22:00".to_string(),
+            end: "02:00".to_string(),
+            refresh_rate: 900,
+        };
+
+        let t_1030pm = NaiveTime::from_hms_opt(22, 30, 0).unwrap();
+        let t_1am = NaiveTime::from_hms_opt(1, 0, 0).unwrap();
+
+        assert!(!rule.matches(Weekday::Fri, t_1am));
+        assert!(rule.matches(Weekday::Fri, t_1030pm));
+        assert!(rule.matches(Weekday::Sat, t_1am));
+        assert!(rule.matches(Weekday::Sat, t_1030pm));
+        assert!(rule.matches(Weekday::Sun, t_1am));
+        assert!(!rule.matches(Weekday::Sun, t_1030pm));
+        assert!(!rule.matches(Weekday::Mon, t_1am));
+    }
+
+    #[test]
+    fn test_overnight_rule_weekdays() {
+        let rule = ScheduleRule {
+            days: DaySelector::Named("weekdays".to_string()),
+            start: "23:00".to_string(),
+            end: "03:00".to_string(),
+            refresh_rate: 1800,
+        };
+
+        let t_11pm = NaiveTime::from_hms_opt(23, 30, 0).unwrap();
+        let t_2am = NaiveTime::from_hms_opt(2, 0, 0).unwrap();
+
+        assert!(rule.matches(Weekday::Mon, t_11pm)); // Mon before midnight
+        assert!(rule.matches(Weekday::Tue, t_2am)); // Mon night carries into Tue
+        assert!(rule.matches(Weekday::Fri, t_11pm)); // Fri before midnight
+        assert!(rule.matches(Weekday::Sat, t_2am)); // Fri night carries into Sat
+        assert!(!rule.matches(Weekday::Sat, t_11pm)); // Sat not a weekday
+        assert!(!rule.matches(Weekday::Sun, t_2am)); // Sat night: Sat not a weekday
+        assert!(!rule.matches(Weekday::Sun, t_11pm)); // Sun not a weekday
+        assert!(!rule.matches(Weekday::Mon, t_2am)); // Sun night: Sun not a weekday
+    }
+
+    #[test]
+    fn test_overnight_rule_sparse_list() {
+        let rule = ScheduleRule {
+            days: DaySelector::List(vec![
+                "mon".to_string(),
+                "tue".to_string(),
+                "thu".to_string(),
+                "sat".to_string(),
+            ]),
+            start: "23:00".to_string(),
+            end: "03:00".to_string(),
+            refresh_rate: 1800,
+        };
+
+        let t_11pm = NaiveTime::from_hms_opt(23, 30, 0).unwrap();
+        let t_2am = NaiveTime::from_hms_opt(2, 0, 0).unwrap();
+
+        assert!(!rule.matches(Weekday::Mon, t_2am)); // Mon morning
+        assert!(rule.matches(Weekday::Mon, t_11pm)); // Mon in list
+        assert!(rule.matches(Weekday::Tue, t_2am)); // Mon night carries into Tue
+        assert!(rule.matches(Weekday::Tue, t_11pm)); // Tue in list
+        assert!(rule.matches(Weekday::Wed, t_2am)); // Tue night carries into Wed
+        assert!(!rule.matches(Weekday::Wed, t_11pm)); // Wed NOT in list
+        assert!(!rule.matches(Weekday::Thu, t_2am)); // Wed night: Wed not in list
+        assert!(rule.matches(Weekday::Thu, t_11pm)); // Thu in list
+        assert!(rule.matches(Weekday::Fri, t_2am)); // Thu night carries into Fri
+        assert!(!rule.matches(Weekday::Fri, t_11pm)); // Fri NOT in list
+        assert!(!rule.matches(Weekday::Sat, t_2am)); // Fri night: Fri not in list
+        assert!(rule.matches(Weekday::Sat, t_11pm)); // Sat in list
+        assert!(rule.matches(Weekday::Sun, t_2am)); // Sat night carries into Sun
+        assert!(!rule.matches(Weekday::Sun, t_11pm)); // Sun NOT in list
+        assert!(!rule.matches(Weekday::Mon, t_2am)); // Sun night: Sun not in list
     }
 
     #[test]
